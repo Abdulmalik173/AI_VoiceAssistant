@@ -1,29 +1,35 @@
 import io
 import os
-import time
 import sounddevice as sd
-import numpy as np
 import assemblyai as aai
 from elevenlabs import generate, stream
 from openai import OpenAI
 import ollama
 import sounddevice as sd
 from scipy.io.wavfile import write
-import wavio as wv
+import numpy as np
+import soundfile as sf
+import librosa
 from config import Config
+from rich import print
+import warnings
 
+warnings.filterwarnings("ignore", category=FutureWarning)
+warnings.filterwarnings("ignore", category=UserWarning)
 os.makedirs(".secrets", exist_ok=True)
 config_path = ".secrets/config.ini"
 config = Config(config_path)
-config.load()
 layout = ["Keys"]
+try:
+    config.load()
+except FileNotFoundError:
+    config.data = None
 if not config.data:
     config.set_layout(layout)
     config.data= {
         "Keys":{
             "assemblyAiKey":"Key",
-            "elevenLabsApiKey": "Key",
-            "OpenAI_APIkey":"Key"
+            "elevenLabsApiKey": "Key"
         }
     }
 
@@ -40,11 +46,21 @@ assemblyAiKey= config.data["Keys"].get("assemblyAiKey")
 if OpenAI_APIkey == None:
     cancel= True
     
-if (elevenLabsApiKey == "Key") or (assemblyAiKey== "Key")\
-    (elevenLabsApiKey == None) or (assemblyAiKey== None):
-    print("Please add the Keys in the file in .secret/config.ini")
+# if (elevenLabsApiKey == "Key") or (assemblyAiKey== "Key")\
+#     (elevenLabsApiKey == None) or (assemblyAiKey== None):
+#     print("Please add the Keys in the file in .secret/config.ini")
     
+def load_audio_from_io(io_file):
+    io_file.seek(0)
+    audio, sample_rate = sf.read(io_file)
 
+    if len(audio.shape) > 1:
+        audio = np.mean(audio, axis=1)
+
+    if sample_rate != 16000:
+        
+        audio = librosa.resample(audio, orig_sr=sample_rate, target_sr=16000)
+    return audio
 
 def detect_speech(data, threshold=0.01):
     return np.max(np.abs(data)) > threshold # Checks if Stopped Talking Like
@@ -101,19 +117,27 @@ class AI_Assistant:
         recording = record_until_silence(self.freq, self.silence_duration)
         fileRecording = io.BytesIO()
         write(fileRecording, self.freq, (recording * 32767).astype(np.int16))
-        self.transcriber = aai.Transcriber()
-        transcript= self.transcriber.transcribe(fileRecording)
-        print(f"Transcript: {transcript.text}")
-        self.on_data(transcript)
 
-    def on_data(self, transcript: aai.transcriber.Transcript):
-        if not transcript.text:
-            return
+        # with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as temp_file:
+        #     fileRecording.seek(0)
+        #     temp_file.write(fileRecording.read())
+        #     temp_file_path = temp_file.name
+        # model = whisper.load_model("base")
+        # transcript = model.transcribe(temp_file_path, language='ar')
+        # print_json(transcript)
+        self.transcriber = aai.Transcriber()
+        transcript= self.transcriber.transcribe(fileRecording  #, aai.TranscriptionConfig()
+            )
         if transcript.error:
             print("An error occured:", transcript.error)
+            print("try again")
+            self.start_transcription()
+        if not transcript:
+            print("No Speech Detects\ntry again")
+            self.start_transcription()
             return
-
-        self.generate_ai_response(transcript)
+        # print(f"Transcript: {transcript}")
+        self.generate_ai_response(transcript.text)
 
     def on_close(self):
         #print("Closing Session")
@@ -123,13 +147,13 @@ class AI_Assistant:
 # Pass real-time transcript to OpenAI 
 
 
-    def generate_ai_response(self, transcript):
+    def generate_ai_response(self, transcript: str):
 
-        self.full_transcript.append({"role":"user", "content": transcript.text})
-        print(f"\nPatient: {transcript.text}", end="\r\n")
+        self.full_transcript.append({"role":"user", "content": transcript})
+        print(f"\nPatient: {transcript}", end="\r\n")
 
         if cancel:
-            response = ollama.chat(model='llama3', messages=self.full_transcript)
+            response = ollama.chat(model='Eonix', messages=self.full_transcript)
         else:
             response = self.openai_client.chat.completions.create(
                 model = "gpt-3.5-turbo",
@@ -170,6 +194,7 @@ ai_assistant.start_transcription()
 
 
 
-# Author    : Abdulmalik Alqahtani
-# Made By   : Abdulmalik Alqahtani
-# Help By   : Yazeed Aloufi
+# Author        : Abdulmalik Alqahtani
+# Made By       : Abdulmalik Alqahtani
+# Developer By  : Mahiro
+# Help by       : Meshari Alnowaishi

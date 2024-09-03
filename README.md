@@ -1,9 +1,7 @@
 # AI_VoiceAssistant
 
-# This need be install:
+# Requirements:
 
-- brew install portaudio
-- pip install "assemblyai[extras]"
-- pip install elevenlabs==0.3.0b0
-- brew install mpv
-- pip install --upgrade openai
+- brew install portaudio / pip install pyaudio
+- brew install mpv / download it in the Microsoft Store
+- requirements.txt
