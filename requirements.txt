@@ -4,7 +4,10 @@ librosa==0.10.2.post1
 numpy==2.1.1
 ollama==0.3.2
 openai==1.43.0
+openai_whisper==20231117
+pygame==2.5.2
 rich==13.8.0
 scipy==1.14.1
 sounddevice==0.5.0
 soundfile==0.12.1
+transformers==4.44.2
