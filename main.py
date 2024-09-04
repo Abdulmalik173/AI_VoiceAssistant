@@ -1,5 +1,5 @@
 import pygame
-import Ai as ai
+import Lib.Ai as ai
 
 # Initialize pygame mixer
 pygame.mixer.init()

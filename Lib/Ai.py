@@ -17,7 +17,7 @@ import numpy as np
 import soundfile as sf
 import librosa
 import json
-import translator as tr
+import Lib.translator as tr
 from data.config import Config
 import warnings
 import whisper
