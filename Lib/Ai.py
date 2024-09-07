@@ -159,7 +159,7 @@ class tempList(list):
     def append(self, item):
         super().append(item)
         with open("data/transcript.json", "w", encoding="utf-8") as f:
-            f.write(json.dumps(self))
+            f.write(json.dumps(self, indent=4))
 
 class AI_Assistant:
     def __init__(self):
@@ -195,7 +195,7 @@ class AI_Assistant:
             finally:
                 os.remove(temp_file_path)
             console.print(f"\nPatient: {transcript.text}", end="\r\n")
-            self.generate_ai_response(transcript.text)
+            return transcript.text
         else:
             self.transcriber = aai.Transcriber()
             transcript = self.transcriber.transcribe(fileRecording)
@@ -204,7 +204,7 @@ class AI_Assistant:
                 console.print("Try again")
                 self.start_transcription()
             console.print(f"\nPatient: {transcript.text}", end="\r\n")
-            self.generate_ai_response(transcript.text)
+            return transcript.text
 
     def on_close(self):
         #console.print("Closing Session")
@@ -230,8 +230,7 @@ class AI_Assistant:
         self.full_transcript.append({'role': 'assistant', 'content': ai_response})
 
         console.print(f"\nAI Receptionist: {translated_text}")
-        self.generate_audio(translated_text)
-        self.start_transcription()
+        return translated_text
 
 
 # Generate audio with ElevenLabs
@@ -239,16 +238,19 @@ class AI_Assistant:
     def generate_audio(self, text):
 
         # self.full_transcript.append({"role":"assistant", "content": text})
-        print(arabic)
         audio_stream = generate(
             api_key = self.elevenlabs_api_key,
             text = text,
             voice = voice,
-            stream=True,
             model="eleven_multilingual_v2" if arabic == True else "eleven_turbo_v2"
         )
+        with open("data/assistant.mp3", "wb") as f:
+            f.write(audio_stream)
+        # with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as temp_audio_file:
+        #     temp_audio_file.write(audio_stream)
+        #     temp_file_path = temp_audio_file.name
+        return "data/assistant.mp3"
 
-        stream(audio_stream)
 
 # Author        : Abdulmalik Alqahtani, Yazeed Aloufi
 # Structure By  : Abdulmalik Alqahtani
