@@ -53,7 +53,7 @@ async function playAudio() {
         };
 
         isPlaying = true;
-        playButton.textContent = 'Stop Audio';
+        playButton.textContent = 'Stop';
         playButton.classList.remove('bg-blue-500', 'hover:bg-blue-600');
         playButton.classList.add('bg-red-500', 'hover:bg-red-600');
     } catch (error) {
@@ -89,7 +89,7 @@ function stopAudio() {
         cancelAnimationFrame(animationId);
     }
     isPlaying = false;
-    playButton.textContent = 'Play Audio';
+    playButton.textContent = 'Start';
     playButton.classList.remove('bg-red-500', 'hover:bg-red-600');
     playButton.classList.add('bg-blue-500', 'hover:bg-blue-600');
 
