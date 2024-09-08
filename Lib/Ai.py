@@ -1,3 +1,8 @@
+import pygame
+from rich.console import Console
+from rich.text import Text
+console = Console()
+console.print(Text("Loading Libraries...", justify="center", style="bold blue"))
 import io
 import os
 import tempfile
@@ -11,18 +16,16 @@ from scipy.io.wavfile import write
 import numpy as np
 import soundfile as sf
 import librosa
+import json
+import Lib.translator as tr
 from data.config import Config
-from rich import print, print_json
-from rich.console import Console
-from rich.text import Text
 import warnings
 import whisper
-from playsound import playsound
-
-console = Console()
 
 warnings.filterwarnings("ignore", category=FutureWarning)
 warnings.filterwarnings("ignore", category=UserWarning)
+
+console.print(Text("Loading Config...", justify="center", style="bold blue"))
 os.makedirs(".secrets", exist_ok=True)
 config_path = ".secrets/config.ini"
 config = Config(config_path)
@@ -40,12 +43,11 @@ if not config.data:
         "general":{
             "model": "base",
             "arabic": False,
-            "voice": "Daniel"
+            "voice": "Will"
         },
         "Advanced":{
             "silence_duration": 3.0,
-            "threshold": 0.01,
-            "OllamaModel": "Eonix"
+            "threshold": 0.01
         }}
 
     config.create_comment("This is optional if you have ollama installed","Keys","elevenLabsApiKey")
@@ -58,8 +60,6 @@ if not config.data:
     config.create_comment("this is the voice of the AI","general","voice")
     config.create_comment("silence_duration is in seconds","Advanced","silence_duration")
     config.create_comment("threshold is the minimum value to detect silence","Advanced","threshold")
-    config.create_comment("Ollama Model is the name of the model you want to use","Advanced","Ollama Model")
-    config.create_comment("[Eonix, Eonix/Arabic]","Advanced","Ollama Model")
     
     config.save()
     console.print("Config file Created, Please add your Keys There!")
@@ -74,8 +74,6 @@ arabic              = bool(config.data["general"].get("arabic"))
 voice               = config.data["general"].get("voice")
 silence_duration    = float(config.data["Advanced"].get("silence_duration"))
 threshold           = float(config.data["Advanced"].get("threshold"))
-ollamaModel         = config.data["Advanced"].get("OllamaModel")
-console.print(Text("السلام عليكم ورحمة الله وبركاته", justify="center", style="bold blue"))
 if OpenAI_APIkey == None:
     cancel= True
 elif OpenAI_APIkey == "Key":
@@ -88,7 +86,7 @@ if elevenLabsApiKey == None:
     console.print("Please add your assemblyAiKey in the config file")
     input()
     exit()
-
+console.print(Text("Finished All Loadings", justify="center", style="bold blue"))
     
 def load_audio_from_io(io_file):
     io_file.seek(0)
@@ -155,6 +153,14 @@ def recognize_speech_with_whisper(audio_path):
 
     return result
 
+class tempList(list):
+    def __init__(self, *args):
+        super().__init__(*args)
+    def append(self, item):
+        super().append(item)
+        with open("data/transcript.json", "w", encoding="utf-8") as f:
+            f.write(json.dumps(self, indent=4))
+
 class AI_Assistant:
     def __init__(self):
         aai.settings.api_key = assemblyAiKey
@@ -162,14 +168,14 @@ class AI_Assistant:
             self.openai_client = OpenAI(api_key =OpenAI_APIkey) # OpenAI optional
         self.elevenlabs_api_key = elevenLabsApiKey
         self.use_whisper = use_whisper
-        self.ollamaModel = ollamaModel
+        self.ollamaModel = "Eonix"
         self.freq = 44100
-        self.transcriber = [{"role":"user", "content": "Hi, I'm Eonix AI"}]
+        self.transcriber = None
 
         # Prompt
-        self.full_transcript = [
-            # {"role":"system", "content":""},
-        ]
+        self.full_transcript = tempList()
+        # {"role":"system", "content":""},
+        # self.full_transcript.append()
 
 
 # Real-Time Transcription with AssemblyAI 
@@ -188,6 +194,8 @@ class AI_Assistant:
                 transcript = recognize_speech_with_whisper(temp_file_path)
             finally:
                 os.remove(temp_file_path)
+            console.print(f"\nPatient: {transcript.text}", end="\r\n")
+            return transcript.text
         else:
             self.transcriber = aai.Transcriber()
             transcript = self.transcriber.transcribe(fileRecording)
@@ -195,7 +203,8 @@ class AI_Assistant:
                 console.print("An error occurred:", transcript.error)
                 console.print("Try again")
                 self.start_transcription()
-        self.generate_ai_response(transcript.text)
+            console.print(f"\nPatient: {transcript.text}", end="\r\n")
+            return transcript.text
 
     def on_close(self):
         #console.print("Closing Session")
@@ -208,10 +217,8 @@ class AI_Assistant:
     def generate_ai_response(self, transcript: str):
 
         self.full_transcript.append({"role":"user", "content": transcript})
-        console.print(f"\nPatient: {transcript}", end="\r\n")
-
         if cancel:
-            response = ollama.chat(model=ollamaModel, messages=self.full_transcript)
+            response = ollama.chat(model=self.ollamaModel, messages=self.full_transcript)
         else:
             response = self.openai_client.chat.completions.create(
                 model = "gpt-3.5-turbo",
@@ -219,10 +226,11 @@ class AI_Assistant:
             )
 
         ai_response = response['message']['content']
+        translated_text = ai_response if arabic == False else tr.translateToArabic(ai_response)
         self.full_transcript.append({'role': 'assistant', 'content': ai_response})
 
-        self.generate_audio(ai_response)
-        self.start_transcription()
+        console.print(f"\nAI Receptionist: {translated_text}")
+        return translated_text
 
 
 # Generate audio with ElevenLabs
@@ -230,19 +238,21 @@ class AI_Assistant:
     def generate_audio(self, text):
 
         # self.full_transcript.append({"role":"assistant", "content": text})
-        console.print(f"\nAI Receptionist: {text}")
-
         audio_stream = generate(
             api_key = self.elevenlabs_api_key,
             text = text,
             voice = voice,
-            stream = True,
-            model="eleven_multilingual_v2"
+            model="eleven_multilingual_v2" if arabic == True else "eleven_turbo_v2"
         )
+        with open("data/assistant.mp3", "wb") as f:
+            f.write(audio_stream)
+        # with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as temp_audio_file:
+        #     temp_audio_file.write(audio_stream)
+        #     temp_file_path = temp_audio_file.name
+        return "data/assistant.mp3"
 
-        stream(audio_stream)
 
-# Author        : Abdulmalik Alqahtani
+# Author        : Abdulmalik Alqahtani, Yazeed Aloufi
 # Structure By  : Abdulmalik Alqahtani
-# Developer By  : Mahiro
+# Developer By  : Yazeed Aloufi
 # Help by       : Meshari Alnowaishi
