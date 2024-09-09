@@ -8,7 +8,8 @@ import Lib.Ai as aii
 app = FastAPI()
 ai = aii.AI_Assistant()
 conversation_history = []
-initial_audio_path = "data/ar.mp3" if aii.arabic else "data/en.mp3"
+initial_audio_path = "data/ar.mp3" if aii.arabic == True else "data/en.mp3"
+print(initial_audio_path)
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
