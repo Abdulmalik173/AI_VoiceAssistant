@@ -1,4 +1,3 @@
-import pygame
 from rich.console import Console
 from rich.text import Text
 console = Console()
@@ -7,8 +6,7 @@ import io
 import os
 import tempfile
 import sounddevice as sd
-import assemblyai as aai
-from elevenlabs import generate, stream
+from elevenlabs import generate
 from openai import OpenAI
 import ollama
 import sounddevice as sd
@@ -17,8 +15,7 @@ import numpy as np
 import soundfile as sf
 import librosa
 import json
-import Lib.translator as tr
-from data.config import Config
+from Lib.config import Config
 import warnings
 import whisper
 
@@ -33,7 +30,7 @@ layout = ["Keys","general","Advanced"]
 try:
     config.load()
 except FileNotFoundError:
-    config.data = None
+    config.data = None #type: ignore
 if not config.data:
     config.set_layout(layout)
     config.data= {
@@ -50,12 +47,10 @@ if not config.data:
             "threshold": 0.01
         }}
 
-    config.create_comment("This is optional if you have ollama installed","Keys","elevenLabsApiKey")
-    config.create_comment("OpenAI_APIkey: \"Key\"","Keys","elevenLabsApiKey")
-    config.create_comment("This is optional if you Want to use whisper instead","Keys","elevenLabsApiKey")
-    config.create_comment("assemblyAiKey: \"Key\"","Keys","elevenLabsApiKey")
+    config.create_comment("This is optional if you have ollama installed and local whisper","Keys","elevenLabsApiKey")
+    config.create_comment("OpenAI_APIkey= \"Key\"","Keys","elevenLabsApiKey")
     config.create_comment("This is required","Keys","elevenLabsApiKey")
-    config.create_comment("models: [tiny, base, small, medium, large]","general","model")
+    config.create_comment("models: [tiny, base, small, medium, large] (If didn't put OpenAI Key Only)","general","model")
     config.create_comment("arabic: [True, False]","general","arabic")
     config.create_comment("this is the voice of the AI","general","voice")
     config.create_comment("silence_duration is in seconds","Advanced","silence_duration")
@@ -67,21 +62,15 @@ if not config.data:
     exit()
 
 OpenAI_APIkey       = config.data["Keys"].get("OpenAI_APIkey") # OpenAI optional
-assemblyAiKey       = config.data["Keys"].get("assemblyAiKey") # AssemblyAI optional
 elevenLabsApiKey    = config.data["Keys"].get("elevenLabsApiKey") # ElevenLabs required
 base                = config.data["general"].get("model")
-arabic              = bool(config.data["general"].get("arabic"))
+arabic              = config.data["general"].get("arabic")
 voice               = config.data["general"].get("voice")
-silence_duration    = float(config.data["Advanced"].get("silence_duration"))
-threshold           = float(config.data["Advanced"].get("threshold"))
-if OpenAI_APIkey == None:
-    cancel= True
-elif OpenAI_APIkey == "Key":
-    cancel= True
-if assemblyAiKey == None:
-    use_whisper= True
-else:
-    use_whisper= False
+silence_duration    = config.data["Advanced"].get("silence_duration")
+threshold           = config.data["Advanced"].get("threshold")
+if OpenAI_APIkey == None: use_GPT= False
+elif OpenAI_APIkey == "Key": use_GPT= False
+else: use_GPT= True
 if elevenLabsApiKey == None:
     console.print("Please add your assemblyAiKey in the config file")
     input()
@@ -130,7 +119,7 @@ def record_until_silence(freq):
             else:
                 silence_counter += (chunk_size / sample_rate)
 
-            if silence_counter > float(silence_duration):
+            if silence_counter > silence_duration: #type: ignore
                 console.print("Silence detected, stopping recording.")
                 break
 
@@ -154,8 +143,6 @@ def recognize_speech_with_whisper(audio_path):
     return result
 
 class tempList(list):
-    def __init__(self, *args):
-        super().__init__(*args)
     def append(self, item):
         super().append(item)
         with open("data/transcript.json", "w", encoding="utf-8") as f:
@@ -163,20 +150,38 @@ class tempList(list):
 
 class AI_Assistant:
     def __init__(self):
-        aai.settings.api_key = assemblyAiKey
-        if not cancel:
-            self.openai_client = OpenAI(api_key =OpenAI_APIkey) # OpenAI optional
+        global use_GPT, OpenAI_APIkey, elevenLabsApiKey
+        print(use_GPT)
+        if use_GPT:
+            self.openai_client = OpenAI(api_key=OpenAI_APIkey)  # OpenAI optional
+            try:
+                with open("Eonix/instructions.txt", "r", encoding="utf-8") as f:
+                    self.assistant = self.openai_client.beta.assistants.create(
+                        name="Eonix",
+                        instructions=f.read(),
+                        model="gpt-4o-mini",
+                    )
+                self.thread = self.openai_client.beta.threads.create()
+                self.thread_id = self.thread.id
+            except FileNotFoundError:
+                print("Instructions file not found.")
         self.elevenlabs_api_key = elevenLabsApiKey
-        self.use_whisper = use_whisper
+        self.use_GPT = use_GPT
         self.ollamaModel = "Eonix"
         self.freq = 44100
         self.transcriber = None
 
         # Prompt
         self.full_transcript = tempList()
-        # {"role":"system", "content":""},
-        # self.full_transcript.append()
-
+        for file in os.listdir("data/info"):
+            try:
+                with open(f"data/info/{file}", "r", encoding="utf-8") as f:
+                    self.full_transcript.append({"role": "system", "content": f"{file}: {f.read()}"})
+            except FileNotFoundError:
+                print(f"Info file {file} not found.")
+    def on_close(self):
+        #console.print("Closing Session")
+        return
 
 # Real-Time Transcription with AssemblyAI 
     def start_transcription(self):
@@ -184,53 +189,58 @@ class AI_Assistant:
         fileRecording = io.BytesIO()
         write(fileRecording, self.freq, (recording * 32767).astype(np.int16))
         fileRecording.seek(0)
-
-        if self.use_whisper:
-            with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as temp_file:
-                temp_file.write(fileRecording.read())
-                temp_file_path = temp_file.name
-
+        with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as temp_file:
+            temp_file.write(fileRecording.read())
+            temp_file_path = temp_file.name
+        if self.use_GPT == False:
             try:
                 transcript = recognize_speech_with_whisper(temp_file_path)
             finally:
                 os.remove(temp_file_path)
-            console.print(f"\nPatient: {transcript.text}", end="\r\n")
-            return transcript.text
+            console.print(f"\nPatient: {transcript.text}", end="\r\n") #type: ignore
+            return transcript.text #type: ignore
         else:
-            self.transcriber = aai.Transcriber()
-            transcript = self.transcriber.transcribe(fileRecording)
-            if transcript.error:
-                console.print("An error occurred:", transcript.error)
-                console.print("Try again")
-                self.start_transcription()
+            print("Using ChatGPT")
+            with open(temp_file_path, "rb") as fileRecording:    
+                transcript= self.openai_client.audio.transcriptions.create(
+                    file = fileRecording,
+                    model="whisper-1",
+                    language="en" if arabic == False else "ar"
+                )
             console.print(f"\nPatient: {transcript.text}", end="\r\n")
             return transcript.text
-
-    def on_close(self):
-        #console.print("Closing Session")
-        return
-
-
-# Pass real-time transcript to OpenAI 
-
 
     def generate_ai_response(self, transcript: str):
 
         self.full_transcript.append({"role":"user", "content": transcript})
-        if cancel:
+        if not use_GPT:
             response = ollama.chat(model=self.ollamaModel, messages=self.full_transcript)
+            ai_response = response['message']['content']
+            self.full_transcript.append({'role': 'assistant', 'content': ai_response})
+            console.print(f"\nAI Receptionist: {ai_response}")
+            return ai_response
         else:
-            response = self.openai_client.chat.completions.create(
-                model = "gpt-3.5-turbo",
-                messages = self.full_transcript
+            message = self.openai_client.beta.threads.messages.create(
+                thread_id=self.thread.id,
+                role="user",
+                content=transcript
             )
-
-        ai_response = response['message']['content']
-        translated_text = ai_response if arabic == False else tr.translateToArabic(ai_response)
+            run = self.openai_client.beta.threads.runs.create_and_poll(
+                thread_id=self.thread.id,
+                assistant_id=self.assistant.id,
+                instructions="This Person Is using speech to speech"
+            )
+            if run.status == 'completed': 
+                messages = self.openai_client.beta.threads.messages.list(
+                  thread_id=self.thread.id
+                )
+            else:
+                print(run.status)
+        messages_list = list(messages)
+        ai_response = messages_list[0].content[0].text.value if messages else None #type: ignore
+        console.print(f"\nAI Receptionist: {ai_response}")
         self.full_transcript.append({'role': 'assistant', 'content': ai_response})
-
-        console.print(f"\nAI Receptionist: {translated_text}")
-        return translated_text
+        return ai_response
 
 
 # Generate audio with ElevenLabs
@@ -241,11 +251,11 @@ class AI_Assistant:
         audio_stream = generate(
             api_key = self.elevenlabs_api_key,
             text = text,
-            voice = voice,
+            voice = voice, #type: ignore
             model="eleven_multilingual_v2" if arabic == True else "eleven_turbo_v2"
         )
         with open("data/assistant.mp3", "wb") as f:
-            f.write(audio_stream)
+            f.write(audio_stream) #type: ignore
         # with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as temp_audio_file:
         #     temp_audio_file.write(audio_stream)
         #     temp_file_path = temp_audio_file.name
